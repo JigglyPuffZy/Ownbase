@@ -11,7 +11,8 @@ test('Ownbase authorization, records, keys and files',async()=>{
  const objects=new Map();const BUCKET={async put(k,stream){objects.set(k,await new Response(stream).arrayBuffer());},async get(k){return objects.has(k)?{body:objects.get(k)}:null;},async delete(k){objects.delete(k);}};
  globalThis.__ownbaseTestEnv={DB,BUCKET};
  const source=readFileSync(new URL('../app/api/ownbase/route.ts',import.meta.url),'utf8').replace("import { env } from 'cloudflare:workers';","const env = globalThis.__ownbaseTestEnv;");
- const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+ const rewritten=source.replace("'../../../lib/sql-store.mjs'",JSON.stringify(new URL('../lib/sql-store.mjs',import.meta.url).href));
+ const js=ts.transpileModule(rewritten,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
  const route=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
  async function call(action,data={},options={}){const method=options.method||'POST',headers={...(options.user===null?{}:{'oai-authenticated-user-id':options.user||'alice'}),...options.headers};let url='https://ownbase.test/api/ownbase',body;if(method==='GET')url+='?'+new URLSearchParams({action,...data});else if(options.form){url+='?'+new URLSearchParams({action,...data});body=options.form;}else{headers['Content-Type']='application/json';body=JSON.stringify({action,...data});}const response=await route[method](new Request(url,{method,headers,body}));const result=options.raw?await response.text():await response.json();return {status:response.status,...(options.raw?{text:result}:result)};}
  assert.equal((await call('state',{}, {user:null,method:'GET'})).status,401);
@@ -40,5 +41,9 @@ test('Ownbase authorization, records, keys and files',async()=>{
  assert.equal((await call('download',{project:second.id,id:upload.id},{method:'GET'})).status,404);
  await call('delete-file',{...p,id:upload.id});assert.equal(objects.size,0);assert.equal((await call('download',{...p,id:upload.id},{method:'GET'})).status,404);
  await call('delete',{...fields,id:r.id});assert.equal((await call('rows',fields,{method:'GET'})).rows.length,0);
+ assert.equal((await call('sql-execute',{...p,query:'SELECT 1;'},{user:'bob'})).status,403);
+ assert.equal((await call('sql-execute',{...p,query:'SELECT 1;'},{user:null,headers:{Authorization:'Bearer '+rotated.key}})).status,403);
+ const sqlResult=await call('sql-execute',{...p,query:'CREATE TABLE app_data(id INTEGER PRIMARY KEY); INSERT INTO app_data VALUES(1); SELECT * FROM app_data;'});assert.equal(sqlResult.status,200);assert.equal(sqlResult.results[2].values[0][0],1);
+ assert.equal((await call('sql-rows',{...p,table:'app_data'},{method:'GET'})).values.length,1);
  sql.close();delete globalThis.__ownbaseTestEnv;
 });

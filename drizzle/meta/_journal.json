@@ -8,6 +8,13 @@
       "when": 1794639707470,
       "tag": "0000_narrow_impossible_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794640312021,
+      "tag": "0001_boring_karen_page",
+      "breakpoints": true
     }
   ]
 }

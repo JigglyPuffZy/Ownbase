@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { projectSql, SqlError } from '../../../lib/sql-store.mjs';
 export const dynamic = 'force-dynamic';
 const json = (v: unknown, status = 200) => Response.json(v, { status, headers: { 'Cache-Control': 'no-store' } });
 const hash = async (s: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))).map(n => n.toString(16).padStart(2, '0')).join('');
@@ -38,6 +39,11 @@ async function handle(req: Request) {
         const owner = user === p.owner;
         if (!owner && (!bearer || await hash(bearer) !== p.key_hash))
             return json({ error: 'Project access denied.' }, 403);
+        if (['sql-execute','sql-schema','sql-rows'].includes(action)) {
+            if(!owner)return json({error:'SQL editor requires the project owner to sign in.'},403);
+            if(action==='sql-execute'&&req.method!=='POST')return json({error:'Use POST to execute SQL.'},405);
+            return json(await projectSql(db,pid,action,{...body,table:url.searchParams.get('table')||body.table}));
+        }
         if (action === 'rotate-key' && req.method === 'POST') {
             if (!owner)
                 return json({ error: 'Owner access required.' }, 403);
@@ -124,6 +130,7 @@ async function handle(req: Request) {
         return json({ error: 'Unknown operation or method.' }, 400);
     }
     catch (e) {
+        if(e instanceof SqlError)return json({error:e.message},e.status);
         console.error(e);
         return json({ error: e instanceof SyntaxError ? 'Invalid JSON.' : 'Request failed. Please try again.' }, 400);
     }
