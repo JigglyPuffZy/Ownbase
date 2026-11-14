@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import {identity,standalone,sameOrigin} from '../../../lib/session.mjs';
 import { projectSql, SqlError } from '../../../lib/sql-store.mjs';
 export const dynamic = 'force-dynamic';
 const json = (v: unknown, status = 200) => Response.json(v, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -10,8 +11,8 @@ async function handle(req: Request) {
         const db = env.DB!;
         if (!db || !env.BUCKET)
             return json({ error: 'Storage bindings unavailable.' }, 503);
-        const url = new URL(req.url), user = req.headers.get('oai-authenticated-user-id'), bearer = req.headers.get('Authorization')?.replace(/^Bearer /, '');
-        if (req.method !== 'GET' && req.headers.get('Origin') && req.headers.get('Origin') !== url.origin)
+        const url = new URL(req.url), user = identity(req), bearer = req.headers.get('Authorization')?.replace(/^Bearer /, '');
+        if (req.method !== 'GET' && req.headers.get('Origin') && !sameOrigin(req))
             return json({ error: 'Cross-origin console writes are not allowed.' }, 403);
         const body: any = req.method === 'POST' && req.headers.get('content-type')?.includes('application/json') ? await req.json() : {};
         if (!body || typeof body !== 'object' || Array.isArray(body))
@@ -19,9 +20,9 @@ async function handle(req: Request) {
         const action = url.searchParams.get('action') || body.action || 'state';
         if (action === 'state') {
             if (!user)
-                return json({ error: 'Sign in to open your workspace.' }, 401);
+                return json({ error: 'Sign in to open your workspace.', signInUrl:standalone()?'/login':'/signin-with-chatgpt?return_to=/' }, 401);
             const p = await db.prepare('SELECT id,name,created FROM projects WHERE owner=? ORDER BY created DESC').bind(user).all();
-            return json({ projects: p.results, user: req.headers.get('oai-authenticated-user-email') || 'Your workspace' });
+            return json({ projects: p.results, user: standalone()?'Administrator':req.headers.get('oai-authenticated-user-email') || 'Your workspace', signInUrl:standalone()?'/login':'/signin-with-chatgpt?return_to=/',signOutUrl:standalone()?'/logout':'/signout-with-chatgpt?return_to=/',hosting:standalone()?'vercel':'sites' });
         }
         if (action === 'create-project' && req.method === 'POST') {
             if (!user)
@@ -70,8 +71,8 @@ async function handle(req: Request) {
             const form = await req.formData(), f = form.get('file');
             if (!(f instanceof File))
                 return json({ error: 'Choose a file.' }, 400);
-            if (f.size > 10 * 1024 * 1024)
-                return json({ error: 'Maximum file size is 10 MB.' }, 413);
+            if (f.size > (standalone()?4:10) * 1024 * 1024)
+                return json({ error: standalone()?'Maximum file size is 4 MB on Vercel.':'Maximum file size is 10 MB.' }, 413);
             const id = crypto.randomUUID();
             await env.BUCKET.put(pid + '/' + id, f.stream(), { httpMetadata: { contentType: f.type || 'application/octet-stream' } });
             try {

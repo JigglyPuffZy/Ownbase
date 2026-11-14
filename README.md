@@ -1,6 +1,8 @@
-# Ownbase
+# Ownbase 1.0.0
 
 A personal, cloud-backed developer workspace inspired by Supabase. Built with React, Vinext, Cloudflare D1 (SQLite) and R2.
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for Vercel setup and [RELEASE_NOTES.md](RELEASE_NOTES.md) for the supported release scope.
 
 ## Implemented
 

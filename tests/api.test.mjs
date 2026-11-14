@@ -12,7 +12,8 @@ test('Ownbase authorization, records, keys and files',async()=>{
  globalThis.__ownbaseTestEnv={DB,BUCKET};
  const source=readFileSync(new URL('../app/api/ownbase/route.ts',import.meta.url),'utf8').replace("import { env } from 'cloudflare:workers';","const env = globalThis.__ownbaseTestEnv;");
  const rewritten=source.replace("'../../../lib/sql-store.mjs'",JSON.stringify(new URL('../lib/sql-store.mjs',import.meta.url).href));
- const js=ts.transpileModule(rewritten,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+ const withSession=rewritten.replace("'../../../lib/session.mjs'",JSON.stringify(new URL('../lib/session.mjs',import.meta.url).href));
+ const js=ts.transpileModule(withSession,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
  const route=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
  async function call(action,data={},options={}){const method=options.method||'POST',headers={...(options.user===null?{}:{'oai-authenticated-user-id':options.user||'alice'}),...options.headers};let url='https://ownbase.test/api/ownbase',body;if(method==='GET')url+='?'+new URLSearchParams({action,...data});else if(options.form){url+='?'+new URLSearchParams({action,...data});body=options.form;}else{headers['Content-Type']='application/json';body=JSON.stringify({action,...data});}const response=await route[method](new Request(url,{method,headers,body}));const result=options.raw?await response.text():await response.json();return {status:response.status,...(options.raw?{text:result}:result)};}
  assert.equal((await call('state',{}, {user:null,method:'GET'})).status,401);

@@ -1,0 +1,7 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "npm run db:migrate:vercel && npm run build:vercel",
+  "installCommand": "npm ci --no-audit --no-fund",
+  "functions": {"app/api/ownbase/route.ts": {"maxDuration": 60}},
+  "headers": [{"source":"/(.*)","headers":[{"key":"X-Content-Type-Options","value":"nosniff"},{"key":"Referrer-Policy","value":"same-origin"}]}]
+}

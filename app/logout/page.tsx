@@ -1,0 +1,1 @@
+export default function Logout(){return <main style={{maxWidth:460,padding:'80px 24px'}}><h1>Sign out of Ownbase?</h1><form action="/api/session" method="post"><input type="hidden" name="action" value="logout"/><button className="primary" style={{marginTop:20}}>Sign out</button></form></main>;}

@@ -15,6 +15,13 @@
       "when": 1794640312021,
       "tag": "0001_boring_karen_page",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794649381219,
+      "tag": "0002_fast_veda",
+      "breakpoints": true
     }
   ]
 }
