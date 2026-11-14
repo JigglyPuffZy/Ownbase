@@ -1,0 +1,44 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync,readdirSync} from 'node:fs';
+import ts from 'typescript';
+
+test('Ownbase authorization, records, keys and files',async()=>{
+ const sql=new DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
+ for(const name of readdirSync(new URL('../drizzle/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort())sql.exec(readFileSync(new URL('../drizzle/'+name,import.meta.url),'utf8'));
+ const DB={prepare(query){const statement=sql.prepare(query);let args=[];return {bind(...v){args=v;return this;},async all(){return {results:statement.all(...args)};},async first(){return statement.get(...args)||null;},async run(){return {meta:statement.run(...args)};}};}};
+ const objects=new Map();const BUCKET={async put(k,stream){objects.set(k,await new Response(stream).arrayBuffer());},async get(k){return objects.has(k)?{body:objects.get(k)}:null;},async delete(k){objects.delete(k);}};
+ globalThis.__ownbaseTestEnv={DB,BUCKET};
+ const source=readFileSync(new URL('../app/api/ownbase/route.ts',import.meta.url),'utf8').replace("import { env } from 'cloudflare:workers';","const env = globalThis.__ownbaseTestEnv;");
+ const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+ const route=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
+ async function call(action,data={},options={}){const method=options.method||'POST',headers={...(options.user===null?{}:{'oai-authenticated-user-id':options.user||'alice'}),...options.headers};let url='https://ownbase.test/api/ownbase',body;if(method==='GET')url+='?'+new URLSearchParams({action,...data});else if(options.form){url+='?'+new URLSearchParams({action,...data});body=options.form;}else{headers['Content-Type']='application/json';body=JSON.stringify({action,...data});}const response=await route[method](new Request(url,{method,headers,body}));const result=options.raw?await response.text():await response.json();return {status:response.status,...(options.raw?{text:result}:result)};}
+ assert.equal((await call('state',{}, {user:null,method:'GET'})).status,401);
+ const project=await call('create-project',{name:'Test project'});assert.equal(project.status,201);assert.match(project.key,/^ob_secret_/);
+ const stored=sql.prepare('SELECT key_hash FROM projects WHERE id=?').get(project.id);assert.notEqual(stored.key_hash,project.key);assert.equal(stored.key_hash.length,64);
+ const p={project:project.id};assert.equal((await call('project',p,{user:'bob',method:'GET'})).status,403);
+ const state=await call('state',{}, {user:'bob',method:'GET'});assert.equal(state.projects.length,0);
+ const c=await call('create-table',{...p,name:'todos'});assert.equal(c.status,201);assert.equal((await call('create-table',{...p,name:'todos'})).status,409);
+ const fields={...p,table:'todos'};const r=await call('insert',{...fields,data:{title:'Hello',active:true}});assert.equal(r.status,201);
+ const read=await call('rows',fields,{method:'GET'});assert.equal(read.rows[0].data.title,'Hello');
+ assert.equal((await call('update',{...fields,id:r.id,data:{title:'Updated'}})).status,200);
+ assert.equal((await call('rows',fields,{method:'GET'})).rows[0].data.title,'Updated');
+ assert.equal((await call('insert',{...fields,data:[]})).status,400);
+ assert.equal((await call('insert',{...fields,data:{x:'a'.repeat(65000)}})).status,413);
+ assert.equal((await call('create-table',{...p,name:"x'); DROP TABLE projects;--"})).status,400);
+ const bearer={user:null,method:'GET',headers:{Authorization:'Bearer '+project.key}};
+ assert.equal((await call('rows',fields,bearer)).status,200);
+ assert.equal((await call('rows',fields,{...bearer,headers:{Authorization:'Bearer wrong'}})).status,403);
+ assert.equal((await call('rotate-key',p,{user:null,headers:bearer.headers})).status,403);
+ const rotated=await call('rotate-key',p);assert.notEqual(rotated.key,project.key);assert.equal((await call('rows',fields,bearer)).status,403);
+ assert.equal((await call('rows',fields,{...bearer,headers:{Authorization:'Bearer '+rotated.key}})).status,200);
+ const second=await call('create-project',{name:'Second'});assert.equal((await call('rows',{project:second.id,table:c.id},{method:'GET'})).status,404);
+ assert.equal((await call('insert',{...fields,data:{bad:true}},{headers:{Origin:'https://evil.test'}})).status,403);
+ const form=new FormData();form.append('file',new File(['hello storage'],'hello.txt',{type:'text/plain'}));const upload=await call('upload',p,{form});assert.equal(upload.status,201);
+ assert.equal((await call('download',{...p,id:upload.id},{method:'GET',raw:true})).text,'hello storage');
+ assert.equal((await call('download',{project:second.id,id:upload.id},{method:'GET'})).status,404);
+ await call('delete-file',{...p,id:upload.id});assert.equal(objects.size,0);assert.equal((await call('download',{...p,id:upload.id},{method:'GET'})).status,404);
+ await call('delete',{...fields,id:r.id});assert.equal((await call('rows',fields,{method:'GET'})).rows.length,0);
+ sql.close();delete globalThis.__ownbaseTestEnv;
+});
